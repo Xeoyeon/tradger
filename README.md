@@ -27,7 +27,7 @@
 
 ```bash
 npm install
-cp .env.example .env   # 값은 아래 "EAS 연결" 이후에 채운다
+cp .env.example .env   # Supabase 값은 환율 기능을 만들 때 채운다
 ```
 
 ### 확인 명령
@@ -41,16 +41,34 @@ npm run format      # 코드 자동 정렬
 
 ### 앱 실행
 
-Unistyles, SQLite 같은 네이티브 모듈을 쓰므로 **Expo Go로는 실행할 수 없고 개발 빌드가 필요하다.**
+Unistyles 같은 네이티브 모듈을 쓰므로 **Expo Go로는 실행할 수 없고 개발 빌드가 필요하다.**
+개발 빌드는 한 번 설치해 두면, 코드를 고칠 때마다 다시 빌드하지 않고 화면에 바로 반영된다. 네이티브 라이브러리를 추가했을 때만 다시 빌드한다.
+
+#### iPhone에서 (Mac 없이, EAS 클라우드 빌드)
+
+Apple Developer Program(연 $99) 가입이 필요하다.
 
 ```bash
-# 방법 1: 내 컴퓨터에서 빌드 (iOS는 macOS + Xcode, Android는 Android Studio 필요)
-npm run ios
-npm run android
+npx eas-cli@latest device:create                                  # 링크를 iPhone에서 열어 기기 등록
+npx eas-cli@latest build --profile development --platform ios     # 완료 후 링크·QR로 설치
+```
 
-# 방법 2: EAS 클라우드에서 개발 빌드를 만들어 폰에 설치한 뒤
-npx eas-cli@latest build --profile development --platform android
-npx expo start --dev-client
+1. iPhone 설정 → 개인정보 보호 및 보안 → **개발자 모드** 켜기 (재시작 필요)
+2. 컴퓨터에서 `npx expo start` 실행
+3. iPhone의 Tradger 개발 빌드를 열고 QR 코드를 스캔 (같은 Wi-Fi가 아니면 `npx expo start --tunnel`)
+
+#### Mac이 있을 때
+
+```bash
+npm run ios      # iOS 시뮬레이터 (무료)
+npx expo run:ios --device   # 연결한 iPhone (무료 Apple ID로도 가능, 7일마다 재설치)
+```
+
+#### Android
+
+```bash
+npm run android  # 에뮬레이터 또는 USB 연결 기기 (Android Studio 필요)
+npx eas-cli@latest build --profile development --platform android  # 클라우드 빌드 후 APK 설치
 ```
 
 ### DB 스키마를 바꿨을 때
@@ -64,11 +82,13 @@ npm run db:generate
 ### EAS 연결 (처음 한 번)
 
 ```bash
-npx eas-cli@latest login
-npx eas-cli@latest init      # 발급된 프로젝트 ID를 .env의 EAS_PROJECT_ID에 넣는다
+npx eas-cli@latest login     # expo.dev에서 만든 계정으로 로그인
+npx eas-cli@latest whoami    # 로그인 확인
+npx eas-cli@latest init      # expo.dev에 프로젝트 생성, 프로젝트 ID 출력
 ```
 
-- 출시 전에 `app.config.ts`의 `bundleIdentifier`·`package`(현재 `com.tradger.app`)를 실제 값으로 정한다. 스토어에 올린 뒤에는 바꿀 수 없다.
+- 출력된 프로젝트 ID를 `app.config.ts`의 `EAS_PROJECT_ID`에 넣는다.
+- 첫 iOS 빌드 전에 `app.config.ts`의 `APP_ID`(현재 `com.tradger.app`)를 확정한다. 스토어에 올린 뒤에는 바꿀 수 없다.
 - 빌드 프로필은 `eas.json`에 있다: `development`(개발 빌드), `preview`(내부 테스트, Android APK), `production`(스토어).
 
 ### 폴더

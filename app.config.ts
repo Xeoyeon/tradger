@@ -1,7 +1,11 @@
 import type { ExpoConfig } from 'expo/config';
 
-// `eas init` 후 발급되는 프로젝트 ID. OTA 업데이트(EAS Update)에 필요하다.
-const easProjectId = process.env.EAS_PROJECT_ID;
+// `npx eas-cli@latest init` 실행 후 출력되는 프로젝트 ID를 넣는다.
+// 비밀 값이 아니므로 코드에 그대로 둔다 (.env에 두면 EAS 클라우드 빌드에 전달되지 않을 수 있다).
+const EAS_PROJECT_ID = '';
+
+// 앱 고유 ID. 첫 iOS 빌드 전에 확정한다. 스토어에 올린 뒤에는 바꿀 수 없다.
+const APP_ID = 'com.tradger.app';
 
 const config: ExpoConfig = {
   name: 'Tradger',
@@ -12,12 +16,11 @@ const config: ExpoConfig = {
   icon: './assets/icon.png',
   userInterfaceStyle: 'automatic',
   ios: {
-    // 출시 전에 실제 사용할 번들 ID로 바꾼다. 스토어 등록 후에는 바꿀 수 없다.
-    bundleIdentifier: 'com.tradger.app',
+    bundleIdentifier: APP_ID,
     supportsTablet: false,
   },
   android: {
-    package: 'com.tradger.app',
+    package: APP_ID,
     adaptiveIcon: {
       backgroundColor: '#E6F4FE',
       foregroundImage: './assets/android-icon-foreground.png',
@@ -28,10 +31,12 @@ const config: ExpoConfig = {
   },
   plugins: ['expo-router', 'expo-sqlite', 'expo-localization'],
   runtimeVersion: { policy: 'fingerprint' },
-  ...(easProjectId && {
-    updates: { url: `https://u.expo.dev/${easProjectId}` },
-    extra: { eas: { projectId: easProjectId } },
-  }),
+  ...(EAS_PROJECT_ID
+    ? {
+        updates: { url: `https://u.expo.dev/${EAS_PROJECT_ID}` },
+        extra: { eas: { projectId: EAS_PROJECT_ID } },
+      }
+    : {}),
 };
 
 export default config;
