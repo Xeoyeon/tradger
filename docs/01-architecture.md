@@ -24,7 +24,7 @@
 4. **환율 API는 서버에서만 호출**
    API 키를 앱에 넣지 않고, 호출 한도를 지키고, 환율 제공처를 앱 업데이트 없이 바꿀 수 있게 하기 위해서다. 앱은 우리 서버에 저장된 환율만 읽는다.
 5. **환율 결정 로직은 교체 가능한 체인**
-   `직접 입력 → 환전 기록(지갑의 평균 환율) → 현재 환율` 순서로 환율을 고른다. 나중에 새 출처를 추가해도 기존 코드를 고치지 않는다.
+   `직접 입력 → 환전 기록(그 돈을 환전할 때의 환율) → 현재 환율` 순서로 환율을 고른다. 나중에 새 출처를 추가해도 기존 코드를 고치지 않는다.
 
 ---
 
@@ -143,10 +143,10 @@ flowchart TB
 |---|---|---|---|
 | — | — | 거래 통화가 KRW (환산 없음) | `BASE` |
 | 1 | `ManualRateSource` | 거래에 환율이나 원화 금액을 직접 입력한 경우 | `MANUAL` |
-| 2 | `ExchangeRateSource` | 현금·충전식 지갑으로 결제했고 그 지갑에 이 통화의 환전 기록이 있는 경우. 지갑의 이동평균 환율 (R2) | `EXCHANGE` |
-| 3 | `MarketRateSource` | 그 밖의 경우. 신용카드 결제 포함 (R3) | `MARKET` |
+| 2 | `ExchangeRateSource` | 환전해 둔 외화에서 결제했고(외화 잔액형 지갑) 그 지갑에 이 통화의 환전 기록이 있는 경우. 그 돈을 환전할 때의 환율 (R2) | `EXCHANGE` |
+| 3 | `MarketRateSource` | 그 밖의 경우. 결제할 때 원화가 나가는 카드 결제 포함 (R3) | `MARKET` |
 
-지갑, 이동평균, 카드 결제 추정·확정 규칙은 [02 문서 3~4장](02-implementation-variables.md#3-환율-결정-규칙-r2--r3의-핵심)에 정리했다.
+지갑 유형, 여러 번 환전했을 때의 규칙(선입선출), 카드 결제 추정·확정 규칙은 [02 문서 3~4장](02-implementation-variables.md#3-환율-결정-규칙-r2--r3의-핵심)에 정리했다.
 
 ```mermaid
 sequenceDiagram
@@ -165,12 +165,12 @@ sequenceDiagram
   UC->>RR: resolve(USD, 거래일시, walletId, manualRate?)
   alt 환율을 직접 입력함
     RR-->>UC: 1,392.10 · MANUAL
-  else 현금·충전식 지갑에 환전 기록 있음
-    RR->>EX: getAverageRate(walletId, USD, 거래일시)
+  else 외화 잔액형 지갑에 환전 기록 있음
+    RR->>EX: allocate(walletId, USD 25.50, 거래일시)
     EX->>DB: 환전 · 지출 기록 시간순 조회
-    DB-->>EX: 이동평균 1,380.00 KRW/USD
+    DB-->>EX: 환전 ①에서 차감 · 1,380.00 KRW/USD
     RR-->>UC: 1,380.00 · EXCHANGE
-  else 카드 결제 또는 환전 기록 없음 → 현재 환율
+  else 원화 결제형 카드 또는 환전 기록 없음 → 현재 환율
     RR->>RT: getRate(USD, 거래일시)
     RT->>DB: 환율 캐시 조회
     opt 캐시 없음 또는 만료 · 온라인
@@ -235,6 +235,8 @@ erDiagram
   WALLET ||--o{ TRANSACTION : "결제"
   CATEGORY ||--o{ TRANSACTION : classifies
   TRANSACTION |o--o{ TRANSACTION : "환불"
+  TRANSACTION ||--o{ LOT_ALLOCATION : "사용한 외화"
+  EXCHANGE ||--o{ LOT_ALLOCATION : "차감됨"
 
   LEDGER {
     text id PK "UUID"
@@ -248,8 +250,8 @@ erDiagram
   WALLET {
     text id PK "UUID"
     text ledger_id FK
-    text name "예: 현금, 트래블카드"
-    text type "CASH, PREPAID, CARD"
+    text name "예: 현금, 트래블로그"
+    text type "FX_BALANCE, KRW_BILLED"
     text est_fee_rate "카드 예상 수수료율"
   }
   EXCHANGE {
@@ -285,6 +287,11 @@ erDiagram
     text name
     text icon
   }
+  LOT_ALLOCATION {
+    text transaction_id FK
+    text exchange_id FK
+    int amount_minor "이 환전에서 쓴 외화"
+  }
   RATE_CACHE {
     text currency PK
     text rate_date PK
@@ -296,9 +303,10 @@ erDiagram
 ```
 
 - **LEDGER**: 가계부 단위(여행 한 건, 한 달 생활비 등). 기준 통화는 기본 KRW.
-- **WALLET**: 결제수단. 현금(`CASH`)·충전식 카드(`PREPAID`)는 환전으로 잔액이 생기고, 일반 카드(`CARD`)는 잔액이 없다.
-- **EXCHANGE**: 환전·충전 기록. R2의 "환전했을 때의 환율"이 여기에 저장된다. 같은 지갑의 환전 기록으로 이동평균 환율을 계산한다.
+- **WALLET**: 결제수단. 기준은 카드 종류가 아니라 돈이 어디서 나가는지다. 외화 잔액형(`FX_BALANCE`: 현금, 트래블카드, 외화통장 체크카드)은 환전으로 잔액이 생기고, 원화 결제형(`KRW_BILLED`: 일반 신용카드, 원화 계좌 체크카드)은 잔액이 없다.
+- **EXCHANGE**: 환전·충전 기록. R2의 "환전했을 때의 환율"이 여기에 저장된다. 같은 지갑에 환율이 다른 돈이 섞이면 먼저 환전한 돈부터 쓴 것으로 계산한다.
 - **TRANSACTION**: 거래. 적용 환율, 출처, 추정/확정 상태, 원화 환산액을 **스냅샷**으로 갖는다.
+- **LOT_ALLOCATION**: 어떤 거래가 어느 환전의 외화를 얼마나 썼는지. 재계산할 때마다 새로 만드는 파생 데이터.
 - **RATE_CACHE**: 서버에서 받은 시장 환율의 로컬 사본.
 - 모든 테이블은 **UUID 기본키, `created_at`, `updated_at`, `deleted_at`** 을 둔다. Phase 2에서 동기화를 붙일 때 스키마를 바꾸지 않기 위해서다.
 
@@ -306,7 +314,7 @@ erDiagram
 
 | 단계 | 범위 | 서버 구성 |
 |---|---|---|
-| **Phase 1 · MVP** | 로그인 없음 · 가계부/지갑/거래/환전 CRUD · 환율 결정 체인(이동평균) · 카드 결제 추정→청구액 확정 · 통화별 합계와 원화 총액 · 카테고리 통계 · CSV 내보내기와 백업 파일 · 앱 잠금 | Supabase: `exchange_rates` 테이블 + `fetch-rates` 함수 + cron만 사용 |
+| **Phase 1 · MVP** | 로그인 없음 · 가계부/지갑/거래/환전 CRUD · 환율 결정 체인(선입선출) · 카드 결제 추정→청구액 확정 · 통화별 합계와 원화 총액 · 카테고리 통계 · CSV 내보내기와 백업 파일 · 앱 잠금 | Supabase: `exchange_rates` 테이블 + `fetch-rates` 함수 + cron만 사용 |
 | **Phase 2** | 계정 · 클라우드 백업과 다기기 동기화 · 동행자와 공유하는 가계부(정산) · 재환전 환차손익 · 외화 간 환전 · 오늘 환율 기준 재평가 · 영수증 OCR | Supabase Auth · 사용자 데이터 테이블 + RLS · 동기화 엔진(PowerSync 또는 자체 구현) |
 
 ---
@@ -345,7 +353,7 @@ tradger/
 │   │   │   ├── transaction.repository.ts
 │   │   │   └── transaction.types.ts
 │   │   ├── exchanges/                    # 환전 기록 (같은 구조)
-│   │   ├── wallets/                      # 지갑(현금·트래블카드·카드), 잔액과 이동평균
+│   │   ├── wallets/                      # 지갑(외화 잔액형·원화 결제형), 잔액과 선입선출 차감
 │   │   ├── rates/                        # 시장 환율 조회·캐시, RateSource 구현체
 │   │   │   ├── rate.repository.ts
 │   │   │   └── sources/                  # manual.ts, exchange.ts, market.ts
@@ -423,4 +431,4 @@ tradger/
 
 ## 다음 문서
 
-- [02. 구현 시 고려해야 할 변수](02-implementation-variables.md): 통화별 소수 자릿수, 반올림, 복수 환전 시 환율 정책, 카드 결제, 환율 소스와 기준 시점, 오프라인 처리, 시간대, 환불, 백업 등
+- [02. 구현 시 고려해야 할 변수](02-implementation-variables.md): 통화별 소수 자릿수, 반올림, 환전 환율 적용 범위와 선입선출, 카드 결제, 환율 소스와 기준 시점, 오프라인 처리, 시간대, 환불, 백업 등
