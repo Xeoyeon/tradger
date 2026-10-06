@@ -301,6 +301,7 @@ erDiagram
     text currency PK
     text rate_date PK
     text rate "1 외화당 원화"
+    text tts "송금 환율, 카드 추정용"
     text source
     text effective_at "고시 시각"
     text fetched_at
@@ -368,11 +369,11 @@ tradger/
 │   │
 │   ├── core/
 │   │   ├── domain/                       # 순수 TS: RN·DB·네트워크 의존 없음
-│   │   │   ├── money.ts                  # Money 타입, 덧셈, 반올림
+│   │   │   ├── currency.ts               # 통화 테이블 (저장·입력 자릿수, 기호, 환율 표시 단위)
+│   │   │   ├── money.ts                  # 금액 파싱, 외화 → 원화 환산, 반올림, 실효 환율
 │   │   │   ├── money.test.ts
-│   │   │   ├── currency.ts               # ISO 4217 메타데이터 (소수 자릿수, 기호)
-│   │   │   ├── conversion.ts             # 외화 ↔ 원화 환산
-│   │   │   ├── conversion.test.ts
+│   │   │   ├── fifo.ts                   # 선입선출 차감 (02 문서 V-13)
+│   │   │   ├── fifo.test.ts
 │   │   │   ├── rate-resolver.ts          # RateSource 체인 실행
 │   │   │   └── rate-resolver.test.ts
 │   │   ├── db/
@@ -390,7 +391,8 @@ tradger/
 │   │   ├── lib/                          # format.ts(자체 통화 포맷터), date.ts, notifications.ts
 │   │   └── theme/
 │   │
-│   └── stores/                           # Zustand: 설정, UI 상태
+│   ├── stores/                           # Zustand: 설정, UI 상태
+│   └── types/                            # 전역 타입 선언 (*.sql 모듈 등)
 │
 ├── supabase/
 │   ├── config.toml
@@ -414,6 +416,7 @@ tradger/
 ├── .github/
 │   └── workflows/
 │       └── ci.yml                        # lint · typecheck · test
+├── index.ts                              # 앱 진입점 (Unistyles 설정 → Expo Router)
 ├── app.config.ts                         # Expo 설정 (환경변수 주입)
 ├── eas.json                              # EAS Build/Submit 프로필
 ├── drizzle.config.ts
