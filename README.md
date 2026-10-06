@@ -10,5 +10,5 @@
 
 | 문서 | 내용 |
 |---|---|
-| [01. 기술 스택 · 시스템 아키텍처 · 폴더 구조](docs/01-architecture.md) | React Native(Expo) + SQLite + Supabase 구성, 환율 결정 흐름, 데이터 모델 초안 |
-| 02. 구현 시 고려해야 할 변수 | 예정 |
+| [01. 기술 스택 · 시스템 아키텍처 · 폴더 구조](docs/01-architecture.md) | React Native(Expo) + SQLite + Supabase 구성, 환율 결정 흐름, 데이터 모델 |
+| [02. 구현 시 고려해야 할 변수](docs/02-implementation-variables.md) | 통화 자릿수·반올림, 복수 환전 정책(이동평균), 카드 결제 추정/확정, 환율 소스·기준 시점, 오프라인, 시간대, 환불, 백업, 경계 케이스 테스트 |

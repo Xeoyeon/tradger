@@ -18,13 +18,13 @@
 1. **로컬 우선(Offline-first)**
    해외에서는 데이터가 자주 끊긴다. 기기 안의 SQLite를 원본 데이터로 쓰고, 네트워크는 환율 갱신(이후에는 백업·동기화)에만 쓴다.
 2. **환율 스냅샷 저장**
-   거래를 저장할 때 *적용한 환율, 환율 출처, 기준 시각, 원화 환산액*을 함께 저장한다. 시세가 바뀌어도 과거 기록의 원화 금액은 바뀌지 않는다.
+   거래를 저장할 때 *적용한 환율, 환율 출처, 기준 시각, 원화 환산액*을 함께 저장한다. 시세가 바뀌어도 과거 기록의 원화 금액은 바뀌지 않는다. 환전 기록을 고치는 것처럼 그 거래의 근거 데이터가 바뀔 때만 다시 계산한다 ([02 문서 V-15](02-implementation-variables.md#v-15-재계산-규칙)).
 3. **부동소수점 금지**
    금액은 **최소 단위 정수**(USD 25.50 → `2550`, KRW 35,190 → `35190`)로, 환율은 **10진 문자열**(`"1380.00"`)로 저장한다. 계산은 decimal 라이브러리로 한다.
 4. **환율 API는 서버에서만 호출**
    API 키를 앱에 넣지 않고, 호출 한도를 지키고, 환율 제공처를 앱 업데이트 없이 바꿀 수 있게 하기 위해서다. 앱은 우리 서버에 저장된 환율만 읽는다.
 5. **환율 결정 로직은 교체 가능한 체인**
-   `직접 입력 → 환전 기록 → 현재 환율` 순서로 환율을 고른다. 나중에 카드 청구 환율 같은 새 출처를 추가해도 기존 코드를 고치지 않는다.
+   `직접 입력 → 환전 기록(지갑의 평균 환율) → 현재 환율` 순서로 환율을 고른다. 나중에 새 출처를 추가해도 기존 코드를 고치지 않는다.
 
 ---
 
@@ -141,9 +141,12 @@ flowchart TB
 
 | 우선순위 | RateSource | 언제 쓰이나 | `rate_source` 값 |
 |---|---|---|---|
-| 1 | `ManualRateSource` | 거래에 환율을 직접 입력한 경우 | `MANUAL` |
-| 2 | `ExchangeRateSource` | 거래를 환전 기록과 연결한 경우 (R2) | `EXCHANGE` |
-| 3 | `MarketRateSource` | 위 두 가지가 없는 경우 (R3) | `MARKET` |
+| — | — | 거래 통화가 KRW (환산 없음) | `BASE` |
+| 1 | `ManualRateSource` | 거래에 환율이나 원화 금액을 직접 입력한 경우 | `MANUAL` |
+| 2 | `ExchangeRateSource` | 현금·충전식 지갑으로 결제했고 그 지갑에 이 통화의 환전 기록이 있는 경우. 지갑의 이동평균 환율 (R2) | `EXCHANGE` |
+| 3 | `MarketRateSource` | 그 밖의 경우. 신용카드 결제 포함 (R3) | `MARKET` |
+
+지갑, 이동평균, 카드 결제 추정·확정 규칙은 [02 문서 3~4장](02-implementation-variables.md#3-환율-결정-규칙-r2--r3의-핵심)에 정리했다.
 
 ```mermaid
 sequenceDiagram
@@ -157,17 +160,17 @@ sequenceDiagram
   participant DB as SQLite
   participant SB as Supabase
 
-  U->>F: 25.50 USD · 식비 · (환전 기록 선택 또는 환율 입력)
+  U->>F: 25.50 USD · 식비 · 지갑 선택 · (환율 직접 입력)
   F->>UC: submit(input)
-  UC->>RR: resolve(USD, 거래일시, manualRate?, exchangeId?)
+  UC->>RR: resolve(USD, 거래일시, walletId, manualRate?)
   alt 환율을 직접 입력함
     RR-->>UC: 1,392.10 · MANUAL
-  else 환전 기록과 연결됨
-    RR->>EX: findById(exchangeId)
-    EX->>DB: SELECT exchanges
-    DB-->>EX: 1,380.00 KRW/USD
+  else 현금·충전식 지갑에 환전 기록 있음
+    RR->>EX: getAverageRate(walletId, USD, 거래일시)
+    EX->>DB: 환전 · 지출 기록 시간순 조회
+    DB-->>EX: 이동평균 1,380.00 KRW/USD
     RR-->>UC: 1,380.00 · EXCHANGE
-  else 둘 다 없음 → 현재 환율
+  else 카드 결제 또는 환전 기록 없음 → 현재 환율
     RR->>RT: getRate(USD, 거래일시)
     RT->>DB: 환율 캐시 조회
     opt 캐시 없음 또는 만료 · 온라인
@@ -188,6 +191,7 @@ sequenceDiagram
 
 - 통화별 총액: `SUM(amount_minor) GROUP BY currency` → 예) `USD 312.40`, `JPY 18,500`
 - 원화 환산 총액: `SUM(base_amount_minor)` → 예) `₩ 612,830`
+- 환전 기록은 지출이 아니므로 두 합계에서 모두 뺀다 ([02 문서 V-30](02-implementation-variables.md#v-30-집계-대상)).
 
 ### 2.4 환율 수집 파이프라인
 
@@ -201,65 +205,80 @@ sequenceDiagram
   participant PG as Postgres exchange_rates
   participant App as 앱 RateRepository
 
-  C->>EF: 주기적 호출 (pg_net)
-  EF->>K: 환율 요청 (서버에 보관한 API Key)
-  alt 정상 응답
-    K-->>EF: 통화별 매매기준율
-  else 실패 또는 데이터 없음
-    EF->>FB: 환율 요청
-    FB-->>EF: 환율
+  C->>EF: 평일 정해진 시각에 호출 (pg_net)
+  par 수출입은행 제공 통화 (22개)
+    EF->>K: 오늘 환율 요청 (서버에 보관한 API Key)
+    K-->>EF: 매매기준율 (고시 전·휴일이면 빈 응답 → 이전 값 유지)
+  and 그 외 통화 (VND, TWD 등)
+    EF->>FB: 최신 환율 요청 (USD 기준)
+    FB-->>EF: 환율 → 원화 기준으로 교차 계산
   end
-  EF->>EF: 정규화 (1 외화당 원화로 통일, JPY(100) 같은 단위 보정, 10진 문자열)
-  EF->>PG: UPSERT (통화, 기준일, 출처)
+  opt 수출입은행 장애가 이어짐
+    EF->>FB: 해당 통화도 보조 소스로 대체 (출처 기록)
+  end
+  EF->>EF: 정규화 (1 외화당 원화, JPY(100) 단위 보정, 10진 문자열) + 이상치 검사
+  EF->>PG: UPSERT (통화, 기준일, 출처, 고시 시각)
   App->>PG: 앱 실행 · 포그라운드 진입 시 최신 환율 조회 (읽기 전용)
   PG-->>App: 환율 목록 + 기준 시각
   App->>App: SQLite 캐시에 저장해 오프라인에서도 사용
 ```
 
-> 수집 주기, 영업일·공휴일 처리, 매매기준율과 현찰 환율 중 무엇을 쓸지 같은 세부 결정은 **02 문서(구현 시 고려할 변수)** 에서 다룬다.
+> 데이터 소스 선택, 수집 주기, 영업일·공휴일 처리, 이상치 기준은 [02 문서 5장](02-implementation-variables.md#5-현재-환율-데이터-market)에 정리했다.
 
 ### 2.5 핵심 데이터 모델 (초안)
 
 ```mermaid
 erDiagram
+  LEDGER ||--o{ WALLET : has
   LEDGER ||--o{ TRANSACTION : contains
-  LEDGER ||--o{ EXCHANGE : contains
+  WALLET ||--o{ EXCHANGE : "환전 · 충전"
+  WALLET ||--o{ TRANSACTION : "결제"
   CATEGORY ||--o{ TRANSACTION : classifies
-  EXCHANGE |o--o{ TRANSACTION : "rate source"
+  TRANSACTION |o--o{ TRANSACTION : "환불"
 
   LEDGER {
     text id PK "UUID"
     text name "예: 2026 뉴욕 여행"
     text base_currency "KRW"
+    text timezone "기본 시간대"
     text created_at
     text updated_at
     text deleted_at "soft delete"
   }
-  EXCHANGE {
+  WALLET {
     text id PK "UUID"
     text ledger_id FK
+    text name "예: 현금, 트래블카드"
+    text type "CASH, PREPAID, CARD"
+    text est_fee_rate "카드 예상 수수료율"
+  }
+  EXCHANGE {
+    text id PK "UUID"
+    text wallet_id FK "들어간 지갑"
     text exchanged_at
     text from_currency "KRW"
-    int from_amount_minor "1000000"
+    int from_amount_minor "690000"
     text to_currency "USD"
-    int to_amount_minor "72464 = 724.64 USD"
-    text rate "1380.00"
-    text memo
+    int to_amount_minor "50000 = 500.00 USD"
+    int fee_minor "별도 수수료"
+    text rate "1380.00 (두 금액에서 계산)"
   }
   TRANSACTION {
     text id PK "UUID"
     text ledger_id FK
+    text wallet_id FK
     text category_id FK
-    text exchange_id FK "nullable"
-    text type "EXPENSE or INCOME"
-    text occurred_at "현지 시각 + 시간대"
+    text refund_of_id FK "nullable"
+    text type "EXPENSE, INCOME, REFUND"
+    text occurred_at "UTC"
+    text timezone "거래 현지 시간대"
     int amount_minor "2550 = 25.50 USD"
     text currency "USD"
     text rate "적용 환율 스냅샷"
-    text rate_source "MANUAL, EXCHANGE, MARKET"
+    text rate_source "BASE, MANUAL, EXCHANGE, MARKET"
+    text rate_status "ESTIMATED, CONFIRMED"
     text rate_as_of "환율 기준 시각"
     int base_amount_minor "35190 = 35,190원"
-    text payment_method "CASH or CARD"
   }
   CATEGORY {
     text id PK "UUID"
@@ -271,13 +290,15 @@ erDiagram
     text rate_date PK
     text rate "1 외화당 원화"
     text source
+    text effective_at "고시 시각"
     text fetched_at
   }
 ```
 
 - **LEDGER**: 가계부 단위(여행 한 건, 한 달 생활비 등). 기준 통화는 기본 KRW.
-- **EXCHANGE**: 환전 기록. R2의 "환전했을 때의 환율"이 여기에 저장된다.
-- **TRANSACTION**: 거래. 적용 환율과 원화 환산액을 **스냅샷**으로 갖는다.
+- **WALLET**: 결제수단. 현금(`CASH`)·충전식 카드(`PREPAID`)는 환전으로 잔액이 생기고, 일반 카드(`CARD`)는 잔액이 없다.
+- **EXCHANGE**: 환전·충전 기록. R2의 "환전했을 때의 환율"이 여기에 저장된다. 같은 지갑의 환전 기록으로 이동평균 환율을 계산한다.
+- **TRANSACTION**: 거래. 적용 환율, 출처, 추정/확정 상태, 원화 환산액을 **스냅샷**으로 갖는다.
 - **RATE_CACHE**: 서버에서 받은 시장 환율의 로컬 사본.
 - 모든 테이블은 **UUID 기본키, `created_at`, `updated_at`, `deleted_at`** 을 둔다. Phase 2에서 동기화를 붙일 때 스키마를 바꾸지 않기 위해서다.
 
@@ -285,8 +306,8 @@ erDiagram
 
 | 단계 | 범위 | 서버 구성 |
 |---|---|---|
-| **Phase 1 · MVP** | 로그인 없음 · 가계부/거래/환전 CRUD · 환율 결정 체인 · 통화별 합계와 원화 총액 · 카테고리 통계 | Supabase: `exchange_rates` 테이블 + `fetch-rates` 함수 + cron만 사용 |
-| **Phase 2** | 계정 · 클라우드 백업과 다기기 동기화 · 동행자와 공유하는 가계부(정산) · 카드 청구 환율 보정 · 영수증 OCR | Supabase Auth · 사용자 데이터 테이블 + RLS · 동기화 엔진(PowerSync 또는 자체 구현) |
+| **Phase 1 · MVP** | 로그인 없음 · 가계부/지갑/거래/환전 CRUD · 환율 결정 체인(이동평균) · 카드 결제 추정→청구액 확정 · 통화별 합계와 원화 총액 · 카테고리 통계 · CSV 내보내기와 백업 파일 · 앱 잠금 | Supabase: `exchange_rates` 테이블 + `fetch-rates` 함수 + cron만 사용 |
+| **Phase 2** | 계정 · 클라우드 백업과 다기기 동기화 · 동행자와 공유하는 가계부(정산) · 재환전 환차손익 · 외화 간 환전 · 오늘 환율 기준 재평가 · 영수증 OCR | Supabase Auth · 사용자 데이터 테이블 + RLS · 동기화 엔진(PowerSync 또는 자체 구현) |
 
 ---
 
@@ -324,6 +345,7 @@ tradger/
 │   │   │   ├── transaction.repository.ts
 │   │   │   └── transaction.types.ts
 │   │   ├── exchanges/                    # 환전 기록 (같은 구조)
+│   │   ├── wallets/                      # 지갑(현금·트래블카드·카드), 잔액과 이동평균
 │   │   ├── rates/                        # 시장 환율 조회·캐시, RateSource 구현체
 │   │   │   ├── rate.repository.ts
 │   │   │   └── sources/                  # manual.ts, exchange.ts, market.ts
@@ -371,7 +393,8 @@ tradger/
 │   └── e2e/                              # Maestro 플로우 (*.yaml)
 ├── assets/                               # 아이콘, 폰트, 스플래시
 ├── docs/
-│   └── 01-architecture.md                # 이 문서
+│   ├── 01-architecture.md                # 이 문서
+│   └── 02-implementation-variables.md    # 구현 시 고려할 변수
 ├── .github/
 │   └── workflows/
 │       └── ci.yml                        # lint · typecheck · test
@@ -400,4 +423,4 @@ tradger/
 
 ## 다음 문서
 
-- **02. 구현 시 고려해야 할 변수** (예정): 통화별 소수 자릿수, 반올림 규칙, 복수 환전 시 환율 정책(가중평균/선입선출), 현찰·카드 환율 차이와 수수료, 환율 기준 시각과 영업일, 오프라인·환율 만료 처리, 시간대, 환불·부분 환전 등
+- [02. 구현 시 고려해야 할 변수](02-implementation-variables.md): 통화별 소수 자릿수, 반올림, 복수 환전 시 환율 정책, 카드 결제, 환율 소스와 기준 시점, 오프라인 처리, 시간대, 환불, 백업 등
