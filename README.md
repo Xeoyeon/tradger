@@ -10,6 +10,7 @@
 
 | 문서 | 내용 |
 |---|---|
-| [01. 기술 스택 · 시스템 아키텍처 · 폴더 구조](docs/01-architecture.md) | React Native(Expo) + SQLite + Supabase 구성, 환율 결정 흐름, 데이터 모델 |
+| [01. 기술 스택 · 시스템 아키텍처 · 폴더 구조](docs/01-architecture.md) | 확정 기술 스택, React Native(Expo) + SQLite + Supabase 구성, 환율 결정 흐름, 데이터 모델 |
 | [02. 구현 시 고려해야 할 변수](docs/02-implementation-variables.md) | 통화 자릿수·반올림, 환전 환율 적용 범위·선입선출, 카드 결제 추정/확정, 환율 소스·기준 시점, 오프라인, 시간대, 환불, 백업, 경계 케이스 테스트 |
 | [03. 기술 스택 검토 — 실제 배포 기준](docs/03-tech-stack-review.md) | 프레임워크 비교(RN·Flutter·네이티브·KMP), 구성 요소별 유지/변경, 스토어 요건, 출시 파이프라인, 운영·비용·리스크 |
+| [04. 출시 전 베타 배포와 사전 홍보](docs/04-beta-and-prelaunch.md) | TestFlight·Play 비공개 테스트, 일정 예시, 대기자 명단과 모집 채널, 피드백 수집, 베타 주의점 |

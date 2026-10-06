@@ -30,29 +30,33 @@
 
 ## 1. 기술 스택
 
-### 권장: React Native (Expo) + TypeScript + Supabase
+### 확정: React Native (Expo) + TypeScript + Supabase
+
+실제 배포 기준 검토와 변경 근거는 [03 문서](03-tech-stack-review.md)에 정리했다.
 
 | 영역 | 선택 | 선택 이유 |
 |---|---|---|
-| 앱 프레임워크 | **React Native + Expo** (관리형 워크플로) | iOS/Android를 한 코드베이스로 개발. EAS로 빌드, 스토어 제출, OTA 업데이트까지 처리 |
+| 앱 프레임워크 | **React Native + Expo** (개발 빌드 사용) | iOS/Android를 한 코드베이스로 개발. EAS로 빌드, 스토어 제출, OTA 업데이트까지 처리. 네이티브 모듈을 쓰기 위해 Expo Go 대신 개발 빌드(dev client)로 개발 |
 | 언어 | **TypeScript** (strict) | 앱과 서버(Edge Function)를 한 언어로 작성 |
 | 라우팅 | **Expo Router** | 파일 기반 라우팅. 탭, 모달, 딥링크 기본 지원 |
-| 로컬 DB | **expo-sqlite + Drizzle ORM** | 오프라인 원본 저장소. 타입 안전한 쿼리와 마이그레이션 제공. `useLiveQuery`로 데이터가 바뀌면 화면이 자동 갱신 |
-| 서버 상태 | **TanStack Query** (+ 캐시 영속화) | 환율 조회의 캐싱, 재시도, 만료(stale) 관리 |
-| 클라이언트 상태 | **Zustand** | 설정(기본 통화, 표시 방식)과 UI 상태. 보일러플레이트가 적음 |
+| 로컬 DB | **expo-sqlite + Drizzle ORM** | 오프라인 원본 저장소. 타입 안전한 쿼리와 마이그레이션 제공. `useLiveQuery`로 데이터가 바뀌면 화면이 자동 갱신. 환율 캐시도 여기에 저장 |
+| 상태 | **Zustand** | 설정(기본 통화, 표시 방식)과 UI 상태. 서버 데이터 캐시 계층(TanStack Query)은 두지 않는다. 화면은 SQLite만 구독한다 |
 | 금액 계산 | **decimal.js** | 부동소수점 오차 차단 (`0.1 + 0.2 ≠ 0.3` 문제) |
-| 숫자·통화 포맷 | **Intl.NumberFormat** (Hermes 내장) | 통화 기호, 소수 자릿수, 천 단위 구분 |
-| 날짜·시간대 | **date-fns + date-fns-tz** | 해외 현지 시각 기록과 표시 |
+| 금액 표시 | **자체 통화 포맷터** (`shared/lib/format.ts`) | 통화 테이블의 기호·자릿수로 직접 만든다. Intl 결과가 플랫폼·버전마다 달라지는 것을 막아 iOS와 Android의 표시를 똑같이 맞춘다 |
+| 날짜·시간대 | **date-fns v4 + @date-fns/tz** | 해외 현지 시각 기록과 표시 |
 | 폼·검증 | **react-hook-form + zod** | 금액·환율 입력 검증. `drizzle-zod`로 DB 스키마에서 검증 스키마 생성 |
-| UI 스타일 | **NativeWind** (Tailwind) | 빠른 UI 개발, 다크 모드 |
+| UI 스타일 | **Unistyles 3** | 안정 버전, 타입 안전한 테마, 다크 모드 |
 | 차트 | **react-native-gifted-charts** | 카테고리별·통화별 지출 차트 |
-| 백엔드 | **Supabase** (Postgres · Edge Functions · pg_cron) | 서버를 직접 운영하지 않고 환율 수집·저장 서버를 구성. Phase 2에서 Auth와 동기화로 확장 |
-| 환율 데이터 | **한국수출입은행 환율 API** (주) + **무료 글로벌 환율 API** (폴백) | 원화 기준 공시 환율을 우선 사용하고, 미지원 통화나 장애에 대비 |
-| 보안 | **expo-secure-store, expo-local-authentication** | 토큰 보관(Phase 2), 생체인증 앱 잠금 |
+| 알림 | **expo-notifications** (로컬 알림) | 카드 청구액 확인 알림. 서버 푸시가 필요 없다 |
+| 백업 | **expo-file-system + expo-sharing + expo-document-picker** | 백업 파일 만들기·복원, CSV 내보내기 |
+| 보안 | **expo-local-authentication, expo-secure-store** | 생체인증 앱 잠금, 토큰 보관(Phase 2) |
+| 백엔드 | **Supabase 서울 리전** (Postgres · Edge Functions · pg_cron) | 환율 수집·저장과 강제 업데이트 설정(`app_config`). 개발·베타는 무료, 정식 출시부터 Pro. Phase 2에서 Auth와 동기화로 확장 |
+| 환율 데이터 | **한국수출입은행 환율 API** (주, TTS 포함) + **ExchangeRate-API** (보조) | 원화 기준 공시 환율과 카드 추정용 송금 환율(TTS). 수집 함수는 `x-region`으로 서울에서 실행 |
 | 테스트 | **Jest (jest-expo) + React Native Testing Library, Maestro** | 도메인 로직 단위 테스트, 화면 흐름 E2E |
 | 코드 품질 | **ESLint + Prettier** | |
-| CI/CD | **GitHub Actions + EAS Build / Submit / Update** | PR마다 lint, typecheck, test 실행. 스토어 배포 자동화 |
-| 모니터링 | **Sentry** (`@sentry/react-native`) | 크래시·에러 추적 |
+| CI/CD | **GitHub Actions + EAS Build / Submit / Update** | PR마다 lint, typecheck, test 실행. 스토어 배포 자동화. OTA는 `fingerprint` 런타임 버전과 단계적 배포 |
+| 모니터링 | **Sentry** (`@sentry/react-native`) | 크래시·에러 추적. 금액·메모는 보내지 않음 |
+| Phase 2 | **PowerSync**, **Supabase Auth + Apple 로그인 + 카카오 로그인** | SQLite ↔ Postgres 동기화. iOS는 소셜 로그인과 함께 Apple 로그인 같은 동등한 옵션이 필요 |
 
 ### 왜 React Native(Expo)인가
 
@@ -60,7 +64,7 @@
 - **OTA 업데이트.** 환율 계산이나 표시 로직의 버그를 스토어 심사 없이 EAS Update로 바로 고칠 수 있다.
 - **생태계.** SQLite, 보안 저장소, 생체인증, 차트 같은 가계부에 필요한 모듈이 Expo에서 바로 동작한다.
 
-> 대안: **Flutter**(Dart + drift)도 충분히 좋은 선택이다. 다만 서버까지 한 언어로 맞추고 OTA로 빠르게 고치려면 Expo가 더 유리하다.
+> 대안: **Flutter**(Dart + drift)도 충분히 좋은 선택이다. 다만 서버까지 한 언어로 맞추고 OTA로 빠르게 고치려면 Expo가 더 유리하다. 비교 근거는 [03 문서 2장](03-tech-stack-review.md#2-앱-프레임워크-비교).
 
 ---
 
@@ -73,7 +77,7 @@ flowchart LR
   subgraph Device["사용자 기기 · iOS / Android"]
     direction TB
     UI["Presentation<br/>Expo Router 화면 · 컴포넌트"]
-    APP["Application<br/>훅 · 유스케이스<br/>TanStack Query · Zustand"]
+    APP["Application<br/>훅 · 유스케이스 · Zustand"]
     DOM["Domain (순수 TS)<br/>Money · Currency · RateResolver"]
     DATA["Data<br/>Repository"]
     DB[("SQLite<br/>거래 · 환전 · 카테고리<br/>+ 환율 캐시")]
@@ -83,16 +87,16 @@ flowchart LR
     DATA --> DB
   end
 
-  subgraph Cloud["Supabase"]
+  subgraph Cloud["Supabase · 서울 리전"]
     direction TB
     REST["REST API<br/>읽기 전용 · RLS"]
-    PG[("Postgres<br/>exchange_rates")]
-    EF["Edge Function<br/>fetch-rates"]
+    PG[("Postgres<br/>exchange_rates · app_config")]
+    EF["Edge Function<br/>fetch-rates<br/>(서울에서 실행)"]
     CRON["pg_cron + pg_net<br/>스케줄러"]
     CRON --> EF
     EF --> PG
     REST --> PG
-    AUTH["Auth · 동기화<br/>(Phase 2)"]
+    AUTH["Auth · PowerSync 동기화<br/>(Phase 2)"]
   end
 
   subgraph Ext["외부 환율 API"]
@@ -100,7 +104,7 @@ flowchart LR
     FB["글로벌 환율 API<br/>(폴백)"]
   end
 
-  DATA -- "환율 조회 HTTPS" --> REST
+  DATA -- "환율 · 최소 지원 버전 조회 HTTPS" --> REST
   DATA -. "백업 · 동기화 (Phase 2)" .-> AUTH
   EF -- "API Key는 서버에만 보관" --> KEXIM
   EF -. "실패 시" .-> FB
@@ -110,8 +114,8 @@ flowchart LR
 |---|---|
 | **앱 (Device)** | 모든 거래·환전 기록의 원본. 오프라인에서도 등록·조회·합계 계산이 모두 가능 |
 | **SQLite 환율 캐시** | 마지막으로 받은 환율을 저장. 오프라인일 때 "현재 환율"로 사용하고 기준 시각을 함께 표시 |
-| **Supabase REST** | 앱이 읽는 유일한 환율 창구. 익명(anon) 키로 읽기만 허용(RLS) |
-| **Edge Function `fetch-rates`** | 외부 API 호출, 응답 정규화(단위·형식 통일), DB 저장 |
+| **Supabase REST** | 앱이 읽는 유일한 서버 창구 (환율, 최소 지원 버전). 익명(anon) 키로 읽기만 허용(RLS) |
+| **Edge Function `fetch-rates`** | 외부 API 호출, 응답 정규화(단위·형식 통일), DB 저장. 수출입은행 API를 국내 IP에서 부르도록 서울 리전에서 실행 |
 | **pg_cron** | 정해진 주기로 `fetch-rates` 호출 |
 | **외부 환율 API** | 주 소스와 폴백 소스. 앱은 어떤 API를 쓰는지 알지 못한다 |
 
@@ -199,13 +203,13 @@ sequenceDiagram
 sequenceDiagram
   autonumber
   participant C as pg_cron
-  participant EF as Edge Function fetch-rates
+  participant EF as Edge Function fetch-rates (서울)
   participant K as 한국수출입은행 API
   participant FB as 폴백 환율 API
   participant PG as Postgres exchange_rates
   participant App as 앱 RateRepository
 
-  C->>EF: 평일 정해진 시각에 호출 (pg_net)
+  C->>EF: 평일 정해진 시각에 호출 (pg_net, x-region 서울)
   par 수출입은행 제공 통화 (22개)
     EF->>K: 오늘 환율 요청 (서버에 보관한 API Key)
     K-->>EF: 매매기준율 (고시 전·휴일이면 빈 응답 → 이전 값 유지)
@@ -315,8 +319,8 @@ erDiagram
 
 | 단계 | 범위 | 서버 구성 |
 |---|---|---|
-| **Phase 1 · MVP** | 로그인 없음 · 가계부/지갑/거래/환전 CRUD · 환율 결정 체인(선입선출) · 카드 결제 추정→청구액 확정 · 통화별 합계와 원화 총액 · 카테고리 통계 · CSV 내보내기와 백업 파일 · 앱 잠금 | Supabase: `exchange_rates` 테이블 + `fetch-rates` 함수 + cron만 사용 |
-| **Phase 2** | 계정 · 클라우드 백업과 다기기 동기화 · 동행자와 공유하는 가계부(정산) · 재환전 환차손익 · 외화 간 환전 · 오늘 환율 기준 재평가 · 영수증 OCR | Supabase Auth · 사용자 데이터 테이블 + RLS · 동기화 엔진(PowerSync 또는 자체 구현) |
+| **Phase 1 · MVP** | 로그인 없음 · 가계부/지갑/거래/환전 CRUD · 환율 결정 체인(선입선출) · 카드 결제 추정→청구액 확정 · 통화별 합계와 원화 총액 · 카테고리 통계 · CSV 내보내기와 백업 파일 · 앱 잠금 | Supabase 서울 리전: `exchange_rates`·`app_config` 테이블 + `fetch-rates` 함수 + cron. 개발·베타는 무료, 정식 출시부터 Pro |
+| **Phase 2** | 계정 · 클라우드 백업과 다기기 동기화 · 동행자와 공유하는 가계부(정산) · 재환전 환차손익 · 외화 간 환전 · 오늘 환율 기준 재평가 · 영수증 OCR | Supabase Auth(Apple·카카오 로그인) · 사용자 데이터 테이블 + RLS · PowerSync |
 
 ---
 
@@ -328,7 +332,7 @@ erDiagram
 tradger/
 ├── src/
 │   ├── app/                              # Expo Router: 파일 하나 = 화면 하나
-│   │   ├── _layout.tsx                   # 루트 Provider (DB, QueryClient, Theme)
+│   │   ├── _layout.tsx                   # 루트 Provider (DB, Theme), 강제 업데이트 확인
 │   │   ├── (tabs)/
 │   │   │   ├── _layout.tsx               # 하단 탭
 │   │   │   ├── index.tsx                 # 홈: 통화별 합계 + 원화 총액
@@ -355,10 +359,11 @@ tradger/
 │   │   │   └── transaction.types.ts
 │   │   ├── exchanges/                    # 환전 기록 (같은 구조)
 │   │   ├── wallets/                      # 지갑(외화 잔액형·원화 결제형), 잔액과 선입선출 차감
-│   │   ├── rates/                        # 시장 환율 조회·캐시, RateSource 구현체
+│   │   ├── rates/                        # 환율 동기화(서버 → SQLite), RateSource 구현체
 │   │   │   ├── rate.repository.ts
 │   │   │   └── sources/                  # manual.ts, exchange.ts, market.ts
 │   │   ├── summary/                      # 통화별 합계, 원화 총액, 차트
+│   │   ├── backup/                       # 백업 파일 만들기·복원, CSV 내보내기
 │   │   └── settings/
 │   │
 │   ├── core/
@@ -382,14 +387,14 @@ tradger/
 │   ├── shared/
 │   │   ├── ui/                           # Button, AmountText, CurrencyPicker, RateBadge ...
 │   │   ├── hooks/
-│   │   ├── lib/                          # format.ts(Intl), date.ts
+│   │   ├── lib/                          # format.ts(자체 통화 포맷터), date.ts, notifications.ts
 │   │   └── theme/
 │   │
 │   └── stores/                           # Zustand: 설정, UI 상태
 │
 ├── supabase/
 │   ├── config.toml
-│   ├── migrations/                       # exchange_rates 테이블, RLS, pg_cron 등록
+│   ├── migrations/                       # exchange_rates·app_config 테이블, RLS, pg_cron 등록
 │   └── functions/
 │       └── fetch-rates/
 │           ├── index.ts                  # 수집 → 정규화 → upsert
@@ -403,7 +408,9 @@ tradger/
 ├── assets/                               # 아이콘, 폰트, 스플래시
 ├── docs/
 │   ├── 01-architecture.md                # 이 문서
-│   └── 02-implementation-variables.md    # 구현 시 고려할 변수
+│   ├── 02-implementation-variables.md    # 구현 시 고려할 변수
+│   ├── 03-tech-stack-review.md           # 기술 스택 검토 (배포 기준)
+│   └── 04-beta-and-prelaunch.md          # 출시 전 베타 배포와 사전 홍보
 ├── .github/
 │   └── workflows/
 │       └── ci.yml                        # lint · typecheck · test
