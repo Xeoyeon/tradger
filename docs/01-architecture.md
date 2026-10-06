@@ -257,6 +257,7 @@ erDiagram
   EXCHANGE {
     text id PK "UUID"
     text wallet_id FK "들어간 지갑"
+    text kind "BUY, CARRY_OVER, RECEIVED"
     text exchanged_at
     text from_currency "KRW"
     int from_amount_minor "690000"
@@ -304,7 +305,7 @@ erDiagram
 
 - **LEDGER**: 가계부 단위(여행 한 건, 한 달 생활비 등). 기준 통화는 기본 KRW.
 - **WALLET**: 결제수단. 기준은 카드 종류가 아니라 돈이 어디서 나가는지다. 외화 잔액형(`FX_BALANCE`: 현금, 트래블카드, 외화통장 체크카드)은 환전으로 잔액이 생기고, 원화 결제형(`KRW_BILLED`: 일반 신용카드, 원화 계좌 체크카드)은 잔액이 없다.
-- **EXCHANGE**: 환전·충전 기록. R2의 "환전했을 때의 환율"이 여기에 저장된다. 같은 지갑에 환율이 다른 돈이 섞이면 먼저 환전한 돈부터 쓴 것으로 계산한다.
+- **EXCHANGE**: 지갑에 외화를 넣은 기록. 환전·충전(`BUY`) 외에 원래 있던 외화(`CARRY_OVER`)와 받은 돈(`RECEIVED`)도 여기에 원화 가치와 함께 넣는다. R2의 "환전했을 때의 환율"이 여기에 저장된다. 같은 지갑에 환율이 다른 돈이 섞이면 먼저 환전한 돈부터 쓴 것으로 계산한다.
 - **TRANSACTION**: 거래. 적용 환율, 출처, 추정/확정 상태, 원화 환산액을 **스냅샷**으로 갖는다.
 - **LOT_ALLOCATION**: 어떤 거래가 어느 환전의 외화를 얼마나 썼는지. 재계산할 때마다 새로 만드는 파생 데이터.
 - **RATE_CACHE**: 서버에서 받은 시장 환율의 로컬 사본.
